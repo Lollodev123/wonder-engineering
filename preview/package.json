@@ -1,0 +1,13 @@
+{
+  "name": "kinetic-monitor-previs-preview",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Static preview server for kinetic monitor-wall concepts",
+  "scripts": {
+    "dev": "serve -l 4173 -s ..",
+    "start": "serve -l 4173 -s .."
+  },
+  "devDependencies": {
+    "serve": "14.2.4"
+  }
+}

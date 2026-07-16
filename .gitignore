@@ -1,0 +1,26 @@
+*.local.md
+.DS_Store
+.env
+.env.local
+concepts/*/screenshot-cache/
+design-system/reference/videos/*.mp4
+design-system/reference/videos/frames/
+node_modules/
+preview/node_modules/
+preview/package-lock.json
+
+# Heavy reference materials (kept local-only)
+_received/
+
+# Claude Code worktrees (auto-generated)
+.claude/worktrees/
+
+# Local-only render outputs
+concepts/*/loop.mp4
+concepts/*/loop.webm
+concepts/*/hero.png
+concepts/*/stage-*.png
+
+# motion-lab render outputs (regenerable)
+motion-lab/out/
+motion-lab/**/__pycache__/

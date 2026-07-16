@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kinetic Monitor Pre-vis — sports-tech demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500&family=Manrope:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root { --ink: #06060A; }
+    html, body {
+      margin: 0; padding: 0; height: 100%; width: 100%;
+      background: var(--ink); color: #fff;
+      font-family: Inter, system-ui, sans-serif;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+    canvas { display: block; }
+    #stage    { position: fixed; inset: 0; }
+
+    /* Caption overlays — appear during specific states */
+    .caption {
+      position: fixed; pointer-events: none;
+      transform-origin: 50% 50%;
+      will-change: transform, opacity;
+      opacity: 0;
+      filter: drop-shadow(0 8px 32px rgba(0,0,0,0.6));
+    }
+    .caption.numeric {
+      font: 200 96px/1 Inter, sans-serif; letter-spacing: -0.03em;
+      color: #fff;
+    }
+    .caption.label {
+      font: 500 11px Manrope, sans-serif; letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.55);
+      margin-top: 6px;
+    }
+    .caption.pill {
+      padding: 9px 18px;
+      border-radius: 9999px;
+      background: rgba(8, 8, 14, 0.65);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      color: #fff;
+      font: 500 12px Manrope, sans-serif;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+      backdrop-filter: blur(14px);
+      white-space: nowrap;
+    }
+
+    .group { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+
+    #replay {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+      padding: 10px 22px; border-radius: 9999px; border: 0; cursor: pointer;
+      background: rgba(255,255,255,0.06); color: #fff;
+      font: 500 11px Inter, sans-serif; letter-spacing: 0.16em; text-transform: uppercase;
+      backdrop-filter: blur(12px);
+      z-index: 100;
+    }
+    #replay:hover { background: rgba(255,255,255,0.14); }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+
+  <!-- Caption overlays appear/disappear per state -->
+  <div id="cap-33" class="caption group" style="left: 8%; top: 10%;">
+    <span class="numeric">33</span><span class="label">joints tracked</span>
+  </div>
+  <div id="cap-5x" class="caption group" style="left: 50%; top: 8%; transform: translateX(-50%); align-items: center;">
+    <span class="numeric">5×</span><span class="label">view comparison</span>
+  </div>
+  <div id="cap-78" class="caption group" style="right: 8%; top: 10%; align-items: flex-end;">
+    <span class="numeric">7.8</span><span class="label">rotation score</span>
+  </div>
+
+  <div id="cap-pose" class="caption pill" style="left: 16%; top: 22%;">3D pose model</div>
+  <div id="cap-analysis" class="caption pill" style="left: 50%; top: 16%; transform: translateX(-50%);">Multimodal analysis</div>
+  <div id="cap-mobile" class="caption pill" style="right: 16%; top: 22%;">Phone video input</div>
+
+  <div id="cap-quote" class="caption" style="left: 50%; bottom: 90px; transform: translateX(-50%); width: min(720px, 88%); text-align: center;">
+    <div style="font: 200 24px/1.5 Inter, sans-serif; letter-spacing: -0.005em;">
+      "See the movement, compare the attempt, choose the next adjustment."
+    </div>
+    <div style="margin-top: 14px; font: 500 11px Manrope, sans-serif; color: rgba(255,255,255,0.55); letter-spacing: 0.18em; text-transform: uppercase;">
+      <span style="color:#D86937;margin-right:8px;">—</span>Demo narration
+    </div>
+  </div>
+
+  <button id="replay">Replay</button>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+  <script>
+  /* ========================================================================
+     KINETIC MONITOR WALL — state-based choreography
+     ========================================================================
+     Choreography distilled from frame-by-frame motion-reference analysis:
+
+     The motion is NOT a wave. It's a panel choreography between 4 states:
+       SCATTER    — tiles in irregular positions, each carries a gradient
+       GRID       — tiles converge to a 5x3 grid showing one big product image
+                    (sliced across the tiles like a mosaic)
+       EXPLODED   — transition state, tiles fly apart
+       REVEAL     — tiles re-form into 3 asymmetric clusters showing
+                    feature content (skier silhouette, ring illustrations,
+                    callout pills) — the "deeper layer" moment
+
+     Each tile carries different content per state. Transitions are dramatic
+     long-distance moves with cinematic easing (cubic-bezier(0.16, 1, 0.3, 1)).
+
+     Loop: 14s.  States cross-fade so tiles never look "snapped".
+     ======================================================================== */
+
+  /* Constants */
+  const W = 1920, H = 1080;
+  const COLS = 5, ROWS = 3, N = COLS * ROWS;
+  const TILE_W = 280, TILE_H = 158;       // 16:9 tiles
+  const GAP = 6;                           // tight when in GRID
+  const GRID_W = COLS * TILE_W + (COLS - 1) * GAP;
+  const GRID_H = ROWS * TILE_H + (ROWS - 1) * GAP;
+  const LEFT_X = -GRID_W / 2 + TILE_W / 2;
+  const TOP_Y  = GRID_H / 2 - TILE_H / 2;
+
+  /* Loop / state timing */
+  const LOOP = 14.0;
+  const T = {
+    scatter_in:  0.0,    // SCATTER state visible
+    grid_start:  3.5,    // begin transition to GRID
+    grid_in:     5.0,    // GRID state fully formed (hero image visible)
+    explode:     8.0,    // tiles begin exploding
+    reveal_in:   9.5,    // REVEAL clusters formed
+    return:    12.5,     // begin transition back to SCATTER
+  };
+  const STATES = ['SCATTER', 'GRID', 'EXPLODED', 'REVEAL'];
+
+  /* Colors */
+  const PALETTE = {
+    bg: 0x06060A,
+    accents: ['#9457E0', '#5DD9F0', '#1F46E5', '#7B3DD9', '#FF7B95', '#0FE5D2', '#5C68B5', '#E2387A']
+  };
+
+  /* Per-tile keyframe positions per state — designed by hand to match references */
+  // SCATTER: irregular, large displacements
+  function scatterPos(i, col, row) {
+    // deterministic pseudo-random per tile
+    const h = Math.sin(i * 12.9898) * 43758.5453;
+    const r = (h - Math.floor(h));
+    const baseX = LEFT_X + col * (TILE_W + GAP);
+    const baseY = TOP_Y - row * (TILE_H + GAP);
+    return {
+      x: baseX + (r - 0.5) * 80,                                            // some lateral jitter
+      y: baseY + ((Math.sin(i * 7.13) + 1) * 100 - 100),                     // big y displacement ±100
+      scale: 0.92 + r * 0.10,                                                // slight scale variation
+      rot: (r - 0.5) * 0.04,                                                 // tiny rotation
+    };
+  }
+
+  // GRID: tight clean grid, all aligned, scale 1
+  function gridPos(i, col, row) {
+    return {
+      x: LEFT_X + col * (TILE_W + GAP),
+      y: TOP_Y - row * (TILE_H + GAP),
+      scale: 1.0,
+      rot: 0,
+    };
+  }
+
+  // REVEAL: 3 asymmetric clusters
+  // Left cluster (4 tiles): pose / skier
+  // Center cluster (5 tiles): rings + lens (vertical stack-ish)
+  // Right cluster (6 tiles): callout pills + skier-detail
+  const REVEAL_LAYOUT = [
+    // i=0..14, hand-placed for compositional balance
+    { x: -680, y:  140, scale: 1.0, content: 'skier-detail' },  //  0: top-left
+    { x: -680, y:  -40, scale: 1.0, content: 'rings' },         //  1: mid-left
+    { x: -680, y: -220, scale: 1.0, content: 'gradient-1' },    //  2: bottom-left
+    { x: -380, y:    0, scale: 1.4, content: 'rings' },         //  3: left center, larger
+    { x:  -50, y:  140, scale: 1.0, content: 'lens' },          //  4: top-center
+    { x:  -50, y:  -40, scale: 1.4, content: 'lens' },          //  5: center, larger
+    { x:  -50, y: -220, scale: 1.0, content: 'gradient-2' },    //  6: bottom-center
+    { x:  280, y:  140, scale: 1.0, content: 'gradient-3' },    //  7: top-right of center
+    { x:  280, y:  -40, scale: 1.0, content: 'rings' },         //  8
+    { x:  280, y: -220, scale: 1.0, content: 'lens' },          //  9
+    { x:  600, y:  140, scale: 1.0, content: 'gradient-4' },    // 10: top-right
+    { x:  600, y:  -40, scale: 1.4, content: 'skier-detail' },  // 11: right center, larger
+    { x:  600, y: -220, scale: 1.0, content: 'gradient-5' },    // 12: bottom-right
+    { x:  830, y:  140, scale: 1.0, content: 'lens' },          // 13: far right top
+    { x:  830, y: -220, scale: 1.0, content: 'gradient-6' },    // 14: far right bottom
+  ];
+
+  // EXPLODED: midway between GRID and REVEAL with extra outward push
+  function explodedPos(i, col, row, revealEntry) {
+    const center = { x: 0, y: 0 };
+    const dx = revealEntry.x - center.x;
+    const dy = revealEntry.y - center.y;
+    return {
+      x: revealEntry.x + dx * 0.5,
+      y: revealEntry.y + dy * 0.5,
+      scale: 0.8,
+      rot: 0,
+    };
+  }
+
+  /* Three.js setup */
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(PALETTE.bg);
+  const camera = new THREE.OrthographicCamera(-W/2, W/2, H/2, -H/2, 0.1, 1000);
+  camera.position.z = 100;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  document.getElementById('stage').appendChild(renderer.domElement);
+
+  function resize() {
+    const aspect = W/H, wnd = window.innerWidth/window.innerHeight;
+    let dW, dH;
+    if (wnd > aspect) { dH = window.innerHeight; dW = dH * aspect; }
+    else              { dW = window.innerWidth;  dH = dW / aspect; }
+    renderer.setSize(dW, dH);
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.left = `${(window.innerWidth - dW)/2}px`;
+    renderer.domElement.style.top  = `${(window.innerHeight - dH)/2}px`;
+  }
+  window.addEventListener('resize', resize);
+
+  /* Backwall vignette */
+  function makeBackwallTex() {
+    const c = document.createElement('canvas'); c.width = 1024; c.height = 576;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(512, 288, 0, 512, 288, 700);
+    g.addColorStop(0, '#10101A');
+    g.addColorStop(0.6, '#06060C');
+    g.addColorStop(1, '#020206');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 1024, 576);
+    return new THREE.CanvasTexture(c);
+  }
+  scene.add(new THREE.Mesh(new THREE.PlaneGeometry(W*2, H*2),
+    new THREE.MeshBasicMaterial({ map: makeBackwallTex(), depthWrite: false })).translateZ(-50));
+
+  /* Asset loaders */
+  const loader = new THREE.TextureLoader();
+  function loadTex(url) {
+    return new Promise((res) => loader.load(url, (t) => {
+      t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter;
+      t.colorSpace = THREE.SRGBColorSpace;
+      res(t);
+    }, undefined, () => res(null)));
+  }
+
+  /* Per-tile gradient canvas painter (for SCATTER state and gradient-N content) */
+  function makeGradientTex(idx) {
+    const c = document.createElement('canvas'); c.width = TILE_W; c.height = TILE_H;
+    const ctx = c.getContext('2d');
+    // pick 2 colors from palette deterministically
+    const c1 = PALETTE.accents[(idx * 3) % PALETTE.accents.length];
+    const c2 = PALETTE.accents[(idx * 5 + 2) % PALETTE.accents.length];
+    const g = ctx.createLinearGradient(0, 0, TILE_W, TILE_H);
+    g.addColorStop(0, c1);
+    g.addColorStop(1, c2);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, TILE_W, TILE_H);
+    // soft inner highlight
+    const top = ctx.createLinearGradient(0, 0, 0, TILE_H * 0.45);
+    top.addColorStop(0, 'rgba(255,255,255,0.10)');
+    top.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = top; ctx.fillRect(0, 0, TILE_W, TILE_H);
+    return new THREE.CanvasTexture(c);
+  }
+
+  /* Hero image slicer — given a loaded full image, return per-tile slice texture */
+  function sliceHero(heroImg, col, row) {
+    const c = document.createElement('canvas'); c.width = TILE_W; c.height = TILE_H;
+    const ctx = c.getContext('2d');
+    const sx = (col / COLS) * heroImg.width;
+    const sy = (row / ROWS) * heroImg.height;
+    const sw = heroImg.width / COLS;
+    const sh = heroImg.height / ROWS;
+    ctx.drawImage(heroImg, sx, sy, sw, sh, 0, 0, TILE_W, TILE_H);
+    return new THREE.CanvasTexture(c);
+  }
+
+  /* Reveal-content texture from a loaded full asset image */
+  function fitContentTex(img) {
+    const c = document.createElement('canvas'); c.width = TILE_W; c.height = TILE_H;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, TILE_W, TILE_H);
+    // cover-fit
+    const iar = img.width / img.height;
+    const tar = TILE_W / TILE_H;
+    let dw, dh, dx, dy;
+    if (iar > tar) { dh = TILE_H; dw = dh * iar; dx = (TILE_W - dw)/2; dy = 0; }
+    else            { dw = TILE_W; dh = dw / iar; dx = 0; dy = (TILE_H - dh)/2; }
+    ctx.drawImage(img, dx, dy, dw, dh);
+    return new THREE.CanvasTexture(c);
+  }
+
+  /* Tiles + state */
+  const tiles = [];
+  for (let i = 0; i < N; i++) {
+    const col = i % COLS, row = Math.floor(i / COLS);
+    const sp = scatterPos(i, col, row);
+    const mat = new THREE.MeshBasicMaterial({ transparent: true });
+    const geo = new THREE.PlaneGeometry(TILE_W, TILE_H);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(sp.x, sp.y, 0);
+    mesh.scale.set(sp.scale, sp.scale, 1);
+    mesh.userData = { i, col, row };
+    scene.add(mesh);
+    tiles.push(mesh);
+  }
+
+  /* Note: postprocessing (bloom/vignette/chromatic aberration) deferred —
+     postprocessing@6 ships ESM-only and needs an importmap setup to use here.
+     For now we render with plain Three.js and use canvas-painted vignette + sheen. */
+
+  /* Easing: cubic-bezier(0.16, 1, 0.3, 1) approximation */
+  function easeOutCine(t) { return 1 - Math.pow(1 - t, 5); }
+  function lerp(a, b, k)  { return a + (b - a) * k; }
+  function smooth(a, b, x) { const t = Math.max(0, Math.min(1, (x-a)/(b-a))); return t*t*(3-2*t); }
+
+  /* Caption refs */
+  const caps = {
+    n33:   document.getElementById('cap-33'),
+    n5x:   document.getElementById('cap-5x'),
+    n78:   document.getElementById('cap-78'),
+    pose:  document.getElementById('cap-pose'),
+    analysis: document.getElementById('cap-analysis'),
+    mobile:document.getElementById('cap-mobile'),
+    quote: document.getElementById('cap-quote'),
+  };
+
+  function setCap(el, alpha, baseTransform = '') {
+    el.style.opacity = alpha;
+    el.style.transform = baseTransform;
+  }
+
+  /* Per-tile keyframes precomputed */
+  const KF = tiles.map((m, i) => {
+    const { col, row } = m.userData;
+    return {
+      scatter:  scatterPos(i, col, row),
+      grid:     gridPos(i, col, row),
+      reveal:   REVEAL_LAYOUT[i],
+      exploded: explodedPos(i, col, row, REVEAL_LAYOUT[i]),
+    };
+  });
+
+  /* Content textures per state, populated after asset load */
+  const CONTENT = tiles.map(() => ({ scatter: null, grid: null, reveal: null }));
+
+  /* Resolve which textures to show */
+  let currentState = 'SCATTER';
+  let lastStateChange = 0;
+
+  /* Load all assets, then start rendering */
+  Promise.all([
+    loadTex('./assets/generated/hero-skier-grid.png'),       // 0: hero (sliced for grid)
+    loadTex('./assets/generated/feature-rings.png'),         // 1: rings
+    loadTex('./assets/generated/feature-lens.png'),          // 2: lens
+    loadTex('./assets/generated/feature-skier-detail.png'),  // 3: skier-detail
+  ]).then(([hero, rings, lens, skierDetail]) => {
+    const contentMap = { 'rings': rings, 'lens': lens, 'skier-detail': skierDetail };
+
+    // Build per-tile textures for each state
+    tiles.forEach((m, i) => {
+      const { col, row } = m.userData;
+      // SCATTER content: gradient
+      CONTENT[i].scatter = makeGradientTex(i);
+      // GRID content: hero slice
+      if (hero && hero.image) {
+        CONTENT[i].grid = sliceHero(hero.image, col, row);
+      } else {
+        CONTENT[i].grid = makeGradientTex(i + 100);
+      }
+      // REVEAL content: from REVEAL_LAYOUT
+      const cType = REVEAL_LAYOUT[i].content;
+      if (cType.startsWith('gradient')) {
+        CONTENT[i].reveal = makeGradientTex(i + parseInt(cType.split('-')[1]) * 11);
+      } else if (contentMap[cType] && contentMap[cType].image) {
+        CONTENT[i].reveal = fitContentTex(contentMap[cType].image);
+      } else {
+        CONTENT[i].reveal = makeGradientTex(i + 200);
+      }
+      // initialize material with scatter texture
+      m.material.map = CONTENT[i].scatter;
+      m.material.needsUpdate = true;
+    });
+
+    resize();
+    requestAnimationFrame(tick);
+  });
+
+  /* Decide tile content based on time + state crossfade */
+  // We crossfade by swapping the texture at midpoint of each transition
+  function pickContentForTile(i, t) {
+    // SCATTER through grid_start: scatter
+    // grid_start..grid_in: lerp opacity or just swap; we do swap at midpoint
+    if (t < (T.grid_start + T.grid_in) / 2)               return CONTENT[i].scatter;
+    if (t < (T.explode + T.reveal_in) / 2)                return CONTENT[i].grid;
+    if (t < (T.return + LOOP) / 2)                        return CONTENT[i].reveal;
+    return CONTENT[i].scatter;
+  }
+
+  /* Position interp between named state keyframes */
+  function pickPositionForTile(i, t) {
+    const k = KF[i];
+
+    // SCATTER (0 → grid_start)
+    if (t < T.grid_start) return k.scatter;
+
+    // SCATTER → GRID (grid_start → grid_in)
+    if (t < T.grid_in) {
+      const p = easeOutCine((t - T.grid_start) / (T.grid_in - T.grid_start));
+      return interp(k.scatter, k.grid, p);
+    }
+
+    // GRID hold (grid_in → explode)
+    if (t < T.explode) return k.grid;
+
+    // GRID → EXPLODED → REVEAL (explode → reveal_in)
+    if (t < T.reveal_in) {
+      const half = (T.explode + T.reveal_in) / 2;
+      if (t < half) {
+        const p = easeOutCine((t - T.explode) / (half - T.explode));
+        return interp(k.grid, k.exploded, p);
+      } else {
+        const p = easeOutCine((t - half) / (T.reveal_in - half));
+        return interp(k.exploded, k.reveal, p);
+      }
+    }
+
+    // REVEAL hold (reveal_in → return)
+    if (t < T.return) return k.reveal;
+
+    // REVEAL → SCATTER (return → LOOP)
+    const p = easeOutCine((t - T.return) / (LOOP - T.return));
+    return interp(k.reveal, k.scatter, p);
+  }
+
+  function interp(a, b, p) {
+    return {
+      x: lerp(a.x, b.x, p),
+      y: lerp(a.y, b.y, p),
+      scale: lerp(a.scale, b.scale, p),
+      rot: lerp(a.rot || 0, b.rot || 0, p),
+    };
+  }
+
+  /* Caption choreography */
+  function updateCaps(t) {
+    // Numeric context is visible during SCATTER, then restored before the loop resets.
+    const numAlpha = (t < T.grid_start ? smooth(0.3, 1.5, t) - smooth(T.grid_start - 0.5, T.grid_start, t)
+                    : t > T.return + 0.5 ? smooth(T.return + 0.5, LOOP - 0.5, t)
+                    : 0);
+    setCap(caps.n33,  numAlpha);
+    setCap(caps.n5x,  numAlpha, 'translateX(-50%)');
+    setCap(caps.n78,  numAlpha);
+
+    // Feature callouts are visible during REVEAL.
+    const revAlpha = smooth(T.reveal_in - 0.3, T.reveal_in + 0.6, t)
+                   - smooth(T.return - 0.3, T.return + 0.5, t);
+    setCap(caps.pose,   revAlpha);
+    setCap(caps.analysis, revAlpha, 'translateX(-50%)');
+    setCap(caps.mobile, revAlpha);
+
+    // quote — last second of REVEAL through return
+    const qAlpha = smooth(T.reveal_in + 1.0, T.return - 0.3, t)
+                 - smooth(T.return + 0.2, T.return + 1.0, t);
+    setCap(caps.quote, qAlpha, 'translateX(-50%)');
+  }
+
+  /* Render loop */
+  let startWall = performance.now();
+  let prevContentT = -1;
+  function tick(now) {
+    const totalT = (now - startWall) / 1000;
+    const t = totalT % LOOP;
+
+    tiles.forEach((m, i) => {
+      const p = pickPositionForTile(i, t);
+      m.position.set(p.x, p.y, 0);
+      m.scale.set(p.scale, p.scale, 1);
+      m.rotation.z = p.rot || 0;
+
+      // content swap (cheap — only updates pointer when needed)
+      const tex = pickContentForTile(i, t);
+      if (m.material.map !== tex) {
+        m.material.map = tex;
+        m.material.needsUpdate = true;
+      }
+    });
+
+    updateCaps(t);
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+  }
+
+  /* Public hooks */
+  window.replayLoop = () => { startWall = performance.now(); };
+  window.setLoopT   = (t) => { startWall = performance.now() - t * 1000; };
+  window.captureLoop = (s = LOOP) => new Promise((resolve, reject) => {
+    window.setLoopT(0);
+    const stream = renderer.domElement.captureStream(60);
+    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    const chunks = [];
+    rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+    rec.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+    rec.onerror = reject;
+    rec.start();
+    setTimeout(() => rec.stop(), s * 1000);
+  });
+
+  document.getElementById('replay').addEventListener('click', () => window.replayLoop());
+  </script>
+</body>
+</html>

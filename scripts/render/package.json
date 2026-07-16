@@ -1,0 +1,14 @@
+{
+  "name": "kinetic-monitor-previs-render",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless Chrome → WebM/MP4 render pipeline for kinetic-wall pre-vis",
+  "scripts": {
+    "render": "node render-mp4.js"
+  },
+  "dependencies": {
+    "puppeteer-core": "^23.0.0",
+    "ffmpeg-static": "^5.2.0"
+  }
+}
