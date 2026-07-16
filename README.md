@@ -10,7 +10,7 @@ An AI-assisted workspace for prototyping motion on a 5×3 kinetic monitor wall b
 
 A kinetic installation is expensive to build and slow to pitch with hand-made motion studies. This project shortens the first exploration loop: turn a structured brief into a reviewable concept, render it, inspect the result, and iterate before a motion designer or hardware team invests in a production file.
 
-The repository is a public, anonymized R&D snapshot. It demonstrates the workflow and constraints without publishing partner-specific assets or operating material.
+The repository is a public, anonymized R&D snapshot, built for a specific company as an internal tool of future frequent use. It demonstrates the workflow and constraints without publishing partner-specific assets or operating material.
 
 ## What works today
 
